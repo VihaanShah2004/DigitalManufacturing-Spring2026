@@ -227,6 +227,22 @@ def circle_points(cx: float, cy: float, radius: float,
              cy + radius * sin(2 * pi * i / n)) for i in range(n + 1)]
 
 
+def circle_fill_points(cx: float, cy: float, radius: float,
+                       spacing: float = 0.8) -> List:
+    """Concentric circle fill from center outward."""
+    pts: List = []
+    n_rings = max(1, int(radius / spacing))
+    for ring in range(n_rings, 0, -1):
+        r = radius * ring / n_rings
+        n = max(8, int(ceil(2 * pi * r / spacing)))
+        ring_pts = [(cx + r * cos(2 * pi * i / n),
+                     cy + r * sin(2 * pi * i / n)) for i in range(n + 1)]
+        if pts:
+            pts.append(None)
+        pts.extend(ring_pts)
+    return pts
+
+
 def rectangle_points(left: float, top: float, w: float, h: float,
                      spacing: float = 0.8) -> List[Tuple[float, float]]:
     r, b = left + w, top + h
@@ -247,13 +263,78 @@ def rectangle_points(left: float, top: float, w: float, h: float,
     return pts
 
 
+def rectangle_fill_points(left: float, top: float, w: float, h: float,
+                           spacing: float = 0.8) -> List:
+    """Horizontal row fill (hatching)."""
+    pts: List = []
+    r, b = left + w, top + h
+    n_rows = max(1, int(h / spacing))
+    for i in range(n_rows):
+        y = top + (i + 0.5) * h / n_rows
+        n_cols = max(1, int(w / spacing))
+        if i % 2 == 0:
+            row_pts = [(left + w * j / n_cols, y) for j in range(n_cols + 1)]
+        else:
+            row_pts = [(left + w * (n_cols - j) / n_cols, y) for j in range(n_cols + 1)]
+        if pts:
+            pts.append(None)
+        pts.extend(row_pts)
+    return pts
+
+
 def star_points(cx: float, cy: float, outer_r: float, inner_r: float,
-                num_pts: int = 5) -> List[Tuple[float, float]]:
-    pts: List[Tuple[float, float]] = []
-    for i in range(num_pts * 2 + 1):
+                num_pts: int = 5, spacing: float = 0.8) -> List[Tuple[float, float]]:
+    """
+    Star outline with subdivided segments (avoids empty/degenerate paths that
+    trigger Ink/Stitch bounding box errors).
+    """
+    if num_pts < 2:
+        num_pts = 5
+    vertices: List[Tuple[float, float]] = []
+    for i in range(num_pts * 2):
         r = outer_r if i % 2 == 0 else inner_r
         t = pi * i / num_pts - pi / 2
-        pts.append((cx + r * cos(t), cy + r * sin(t)))
+        vertices.append((cx + r * cos(t), cy + r * sin(t)))
+    vertices.append(vertices[0])
+    pts: List[Tuple[float, float]] = [vertices[0]]
+    for i in range(len(vertices) - 1):
+        x0, y0 = vertices[i]
+        x1, y1 = vertices[i + 1]
+        seg_len = sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2)
+        n = max(1, int(ceil(seg_len / spacing)))
+        for j in range(1, n + 1):
+            t = j / n
+            pts.append((x0 + t * (x1 - x0), y0 + t * (y1 - y0)))
+    return pts
+
+
+def star_fill_points(cx: float, cy: float, outer_r: float, inner_r: float,
+                     num_pts: int = 5, spacing: float = 0.8) -> List:
+    """Concentric inset star fill."""
+    if num_pts < 2:
+        num_pts = 5
+    n_rings = max(1, int(outer_r / spacing))
+    pts: List = []
+    for ring in range(n_rings, 0, -1):
+        scale = ring / n_rings
+        vertices: List[Tuple[float, float]] = []
+        for i in range(num_pts * 2):
+            r = (outer_r if i % 2 == 0 else inner_r) * scale
+            t = pi * i / num_pts - pi / 2
+            vertices.append((cx + r * cos(t), cy + r * sin(t)))
+        vertices.append(vertices[0])
+        ring_pts: List[Tuple[float, float]] = [vertices[0]]
+        for i in range(len(vertices) - 1):
+            x0, y0 = vertices[i]
+            x1, y1 = vertices[i + 1]
+            seg_len = sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2)
+            n = max(1, int(ceil(seg_len / spacing)))
+            for j in range(1, n + 1):
+                t = j / n
+                ring_pts.append((x0 + t * (x1 - x0), y0 + t * (y1 - y0)))
+        if pts:
+            pts.append(None)
+        pts.extend(ring_pts)
     return pts
 
 
@@ -316,6 +397,49 @@ def koch_snowflake_points(cx: float, cy: float, side: float,
     _koch_segment(v_top, v_right, depth, pts)
     _koch_segment(v_right, v_left, depth, pts)
     _koch_segment(v_left, v_top, depth, pts)
+    return pts
+
+
+def _subdivide_path(path: List[Tuple[float, float]], max_seg_mm: float) -> List[Tuple[float, float]]:
+    """Subdivide path segments longer than max_seg_mm."""
+    if len(path) < 2 or max_seg_mm <= 0:
+        return path
+    out: List[Tuple[float, float]] = [path[0]]
+    for i in range(1, len(path)):
+        x0, y0 = path[i - 1]
+        x1, y1 = path[i]
+        dx, dy = x1 - x0, y1 - y0
+        length = sqrt(dx * dx + dy * dy)
+        n = max(1, int(ceil(length / max_seg_mm)))
+        for j in range(1, n + 1):
+            t = j / n
+            out.append((x0 + t * dx, y0 + t * dy))
+    return out
+
+
+def koch_snowflake_fill_points(cx: float, cy: float, side: float,
+                               depth: int, spacing: float = 0.8) -> List:
+    """Concentric Koch snowflake fill."""
+    depth = max(0, min(depth, 4))
+    h = side * sqrt(3.0) / 2.0
+    radius_approx = 2.0 * h / 3.0
+    n_rings = max(1, int(radius_approx / spacing))
+    pts: List = []
+    for ring in range(n_rings, 0, -1):
+        scale = ring / n_rings
+        side_i = side * scale
+        h_i = side_i * sqrt(3.0) / 2.0
+        v_top = (cx, cy - 2.0 * h_i / 3.0)
+        v_left = (cx - side_i / 2.0, cy + h_i / 3.0)
+        v_right = (cx + side_i / 2.0, cy + h_i / 3.0)
+        ring_pts: List[Tuple[float, float]] = [v_top]
+        _koch_segment(v_top, v_right, depth, ring_pts)
+        _koch_segment(v_right, v_left, depth, ring_pts)
+        _koch_segment(v_left, v_top, depth, ring_pts)
+        ring_pts = _subdivide_path(ring_pts, spacing)
+        if pts:
+            pts.append(None)
+        pts.extend(ring_pts)
     return pts
 
 
@@ -508,6 +632,13 @@ def prompt_color(prompt: str, default: str = "black") -> str:
     return s
 
 
+def prompt_fill(prompt: str = "Fill shape (y/n)", default: bool = False) -> bool:
+    s = input(f"{prompt} [{'y' if default else 'n'}]: ").strip().lower()
+    if not s:
+        return default
+    return s in ("y", "yes", "1")
+
+
 def main():
     print("=== JEF Embroidery File Generator (Final) ===")
     print("All sizes are in millimeters. Keep your design within 100 x 100 mm.")
@@ -550,8 +681,10 @@ def main():
             cx = prompt_float("Center X", 0.0)
             cy = prompt_float("Center Y", 0.0)
             radius = prompt_float("Radius (<= 50 mm)", 20.0)
+            fill = prompt_fill()
             color = prompt_color("Thread color", "blue")
-            sequences.append(circle_points(cx, cy, radius, spacing_mm))
+            seq = circle_fill_points(cx, cy, radius, spacing_mm) if fill else circle_points(cx, cy, radius, spacing_mm)
+            sequences.append(seq)
             colors.append(color)
 
         elif pc == 2:
@@ -560,8 +693,10 @@ def main():
             tp = prompt_float("Top Y", -20.0)
             w = prompt_float("Width", 40.0)
             h = prompt_float("Height", 40.0)
+            fill = prompt_fill()
             color = prompt_color("Thread color", "green")
-            sequences.append(rectangle_points(lf, tp, w, h, spacing_mm))
+            seq = rectangle_fill_points(lf, tp, w, h, spacing_mm) if fill else rectangle_points(lf, tp, w, h, spacing_mm)
+            sequences.append(seq)
             colors.append(color)
 
         elif pc == 3:
@@ -571,8 +706,10 @@ def main():
             outer = prompt_float("Outer radius", 30.0)
             inner = prompt_float("Inner radius", 12.0)
             npts = prompt_int("Number of points", 5)
+            fill = prompt_fill()
             color = prompt_color("Thread color", "gold")
-            sequences.append(star_points(cx, cy, outer, inner, npts))
+            seq = star_fill_points(cx, cy, outer, inner, npts, spacing_mm) if fill else star_points(cx, cy, outer, inner, npts, spacing_mm)
+            sequences.append(seq)
             colors.append(color)
 
         elif pc == 4:
@@ -581,8 +718,10 @@ def main():
             cy = prompt_float("Center Y", 0.0)
             side = prompt_float("Triangle side length (<= 60 mm)", 50.0)
             depth = prompt_int("Recursion depth (0-4)", 3)
+            fill = prompt_fill()
             color = prompt_color("Thread color", "red")
-            sequences.append(koch_snowflake_points(cx, cy, side, depth))
+            seq = koch_snowflake_fill_points(cx, cy, side, depth, spacing_mm) if fill else koch_snowflake_points(cx, cy, side, depth)
+            sequences.append(seq)
             colors.append(color)
 
         elif pc == 5:
@@ -614,8 +753,10 @@ def main():
             cy = prompt_float("Snowflake center Y", -5.0)
             side = prompt_float("Snowflake side length (<= 60 mm)", 40.0)
             depth = prompt_int("Snowflake recursion depth (0-4)", 3)
+            fill = prompt_fill()
             cf = prompt_color("Snowflake color", "blue")
-            sequences.append(koch_snowflake_points(cx, cy, side, depth))
+            seq = koch_snowflake_fill_points(cx, cy, side, depth, spacing_mm) if fill else koch_snowflake_points(cx, cy, side, depth)
+            sequences.append(seq)
             colors.append(cf)
 
             text = input("Text to embroider below snowflake: ").strip() or "COLUMBIA"
