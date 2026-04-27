@@ -2,15 +2,9 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 
-FIXED_T1_OFFSET_X = 12.0
+FIXED_T1_OFFSET_X = 24.0
 FIXED_T1_OFFSET_Y = 0.0
 FIXED_T1_OFFSET_Z = 0.0
-FIXED_BASE_Z = 6.0
-FIXED_LAYER_HEIGHT = 1.0
-FIXED_START_EXTRUSION = 3.0
-FIXED_EXTRUSION_INCREMENT = 1.8
-T0_EXTRUSION_SIGN = 1.0
-T1_EXTRUSION_SIGN = 1.0
 
 
 def fmt(value: float) -> str:
@@ -52,12 +46,12 @@ def collect_inputs() -> SimpleNamespace:
         shape=shape,
         center_x=prompt_float("Shape center X (T0 frame)", 60.0),
         center_y=prompt_float("Shape center Y (T0 frame)", 60.0),
-        base_z=FIXED_BASE_Z,
-        radius=prompt_float("Shape radius (mm)", 20.0),
-        layers=prompt_int("Number of layers", 6),
-        layer_height=FIXED_LAYER_HEIGHT,
+        base_z=prompt_float("Starting Z", 5.0),
+        radius=prompt_float("Shape radius (mm)", 12.0),
+        layers=prompt_int("Number of layers", 20),
+        layer_height=prompt_float("Layer height (mm)", 0.8),
         segments=prompt_int("Segments per loop", 72),
-        edge_e=FIXED_EXTRUSION_INCREMENT,
+        edge_e=prompt_float("Extrusion increment per segment", 1.0),
         travel_feed=prompt_int("Travel feedrate (mm/min)", 1600),
         print_feed=prompt_int("Print feedrate (mm/min)", 850),
         z_feed=prompt_int("Z feedrate (mm/min)", 600),
@@ -70,7 +64,7 @@ def collect_inputs() -> SimpleNamespace:
         t1_offset_x=FIXED_T1_OFFSET_X,
         t1_offset_y=FIXED_T1_OFFSET_Y,
         t1_offset_z=FIXED_T1_OFFSET_Z,
-        manual_offset_compensation=prompt_bool("Use manual software offset compensation", True),
+        manual_offset_compensation=prompt_bool("Use manual software offset compensation", False),
     )
 
 
@@ -128,10 +122,6 @@ def tool_compensated_z(z: float, tool: str, t1_offset_z: float) -> float:
     return z
 
 
-def tool_extrusion_sign(tool: str) -> float:
-    return T1_EXTRUSION_SIGN if tool == "T1" else T0_EXTRUSION_SIGN
-
-
 def add_prime_sequence(
     lines: list[str],
     tool: str,
@@ -144,12 +134,11 @@ def add_prime_sequence(
     travel_feed: int,
     print_feed: int,
 ) -> None:
-    prime_e_signed = prime_e * tool_extrusion_sign(tool)
     lines.append(f"{tool} ; Select tool for prime")
     lines.append("G92 E0")
     lines.append(f"G0 Z{fmt(z)} F{z_feed}")
     lines.append(f"G0 X{fmt(x)} Y{fmt(y)} F{travel_feed}")
-    lines.append(f"G1 X{fmt(x + prime_len)} Y{fmt(y)} E{fmt(prime_e_signed)} F{print_feed}")
+    lines.append(f"G1 X{fmt(x + prime_len)} Y{fmt(y)} E{fmt(prime_e)} F{print_feed}")
     lines.append("G92 E0")
 
 
@@ -176,7 +165,7 @@ def build_gcode(args: SimpleNamespace) -> list[str]:
         f"; Manual software compensation: {'ON' if args.manual_offset_compensation else 'OFF (firmware G10 handles offsets)'}",
         "G21 ; mm units",
         "G90 ; absolute XY",
-        "M83 ; relative extrusion",
+        "M82 ; absolute extrusion",
         "G92 E0",
         f"M106 S{args.fan}",
     ]
@@ -237,8 +226,7 @@ def build_gcode(args: SimpleNamespace) -> list[str]:
                     safe_z = z + 3.0
                     lines.append(f"G0 Z{fmt(safe_z)} F{args.z_feed} ; Safe height retract before tool change")
                 lines.append(f"{tool} ; Tool change")
-                tool_switch_prime_signed = tool_switch_prime_e * tool_extrusion_sign(tool)
-                lines.append(f"G1 E{fmt(tool_switch_prime_signed)} F{tool_switch_prime_feed} ; Tool-change prime")
+                lines.append(f"G1 E{fmt(tool_switch_prime_e)} F{tool_switch_prime_feed} ; Tool-change prime")
                 lines.append("G92 E0")
                 active_tool = tool
                 pending_tool_switch = True
@@ -258,16 +246,14 @@ def build_gcode(args: SimpleNamespace) -> list[str]:
                 lines.append(f"G0 Z{fmt(tz)} F{args.z_feed}")
                 lines.append(f"G0 X{fmt(sx)} Y{fmt(sy)} F{args.travel_feed}")
 
-            first_segment = True
+            e_total = 0.0
             for x, y in pts[1:]:
                 if args.manual_offset_compensation:
                     tx, ty = tool_compensated_xy(x, y, tool, args.t1_offset_x, args.t1_offset_y)
                 else:
                     tx, ty = x, y
-                e_delta = FIXED_START_EXTRUSION if first_segment else args.edge_e
-                e_signed = e_delta * tool_extrusion_sign(tool)
-                lines.append(f"G1 X{fmt(tx)} Y{fmt(ty)} E{fmt(e_signed)} F{args.print_feed}")
-                first_segment = False
+                e_total += args.edge_e
+                lines.append(f"G1 X{fmt(tx)} Y{fmt(ty)} E{fmt(e_total)} F{args.print_feed}")
 
     lines.extend(
         [

@@ -2,7 +2,7 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 
-FIXED_T1_OFFSET_X = 12.0
+FIXED_T1_OFFSET_X = 24.0
 FIXED_T1_OFFSET_Y = 0.0
 FIXED_T1_OFFSET_Z = 0.0
 FIXED_BASE_Z = 6.0
@@ -54,7 +54,7 @@ def collect_inputs() -> SimpleNamespace:
         center_y=prompt_float("Shape center Y (T0 frame)", 60.0),
         base_z=FIXED_BASE_Z,
         radius=prompt_float("Shape radius (mm)", 20.0),
-        layers=prompt_int("Number of layers", 6),
+        layers=prompt_int("Number of layers", 8),
         layer_height=FIXED_LAYER_HEIGHT,
         segments=prompt_int("Segments per loop", 72),
         edge_e=FIXED_EXTRUSION_INCREMENT,

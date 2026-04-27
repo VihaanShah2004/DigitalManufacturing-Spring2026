@@ -2,7 +2,7 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 
-FIXED_T1_OFFSET_X = 12.0
+FIXED_T1_OFFSET_X = 24.0
 FIXED_T1_OFFSET_Y = 0.0
 FIXED_T1_OFFSET_Z = 0.0
 FIXED_BASE_Z = 6.0
@@ -10,7 +10,7 @@ FIXED_LAYER_HEIGHT = 1.0
 FIXED_START_EXTRUSION = 3.0
 FIXED_EXTRUSION_INCREMENT = 1.8
 T0_EXTRUSION_SIGN = 1.0
-T1_EXTRUSION_SIGN = 1.0
+T1_EXTRUSION_SIGN = -1.0
 
 
 def fmt(value: float) -> str:
@@ -53,8 +53,8 @@ def collect_inputs() -> SimpleNamespace:
         center_x=prompt_float("Shape center X (T0 frame)", 60.0),
         center_y=prompt_float("Shape center Y (T0 frame)", 60.0),
         base_z=FIXED_BASE_Z,
-        radius=prompt_float("Shape radius (mm)", 20.0),
-        layers=prompt_int("Number of layers", 6),
+        radius=prompt_float("Shape radius (mm)", 12.0),
+        layers=prompt_int("Number of layers", 14),
         layer_height=FIXED_LAYER_HEIGHT,
         segments=prompt_int("Segments per loop", 72),
         edge_e=FIXED_EXTRUSION_INCREMENT,
@@ -176,7 +176,7 @@ def build_gcode(args: SimpleNamespace) -> list[str]:
         f"; Manual software compensation: {'ON' if args.manual_offset_compensation else 'OFF (firmware G10 handles offsets)'}",
         "G21 ; mm units",
         "G90 ; absolute XY",
-        "M83 ; relative extrusion",
+        "M82 ; absolute extrusion",
         "G92 E0",
         f"M106 S{args.fan}",
     ]
@@ -258,16 +258,15 @@ def build_gcode(args: SimpleNamespace) -> list[str]:
                 lines.append(f"G0 Z{fmt(tz)} F{args.z_feed}")
                 lines.append(f"G0 X{fmt(sx)} Y{fmt(sy)} F{args.travel_feed}")
 
-            first_segment = True
+            e_total = FIXED_START_EXTRUSION
             for x, y in pts[1:]:
                 if args.manual_offset_compensation:
                     tx, ty = tool_compensated_xy(x, y, tool, args.t1_offset_x, args.t1_offset_y)
                 else:
                     tx, ty = x, y
-                e_delta = FIXED_START_EXTRUSION if first_segment else args.edge_e
-                e_signed = e_delta * tool_extrusion_sign(tool)
+                e_signed = e_total * tool_extrusion_sign(tool)
                 lines.append(f"G1 X{fmt(tx)} Y{fmt(ty)} E{fmt(e_signed)} F{args.print_feed}")
-                first_segment = False
+                e_total += args.edge_e
 
     lines.extend(
         [

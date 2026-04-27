@@ -2,7 +2,7 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 
-FIXED_T1_OFFSET_X = 12.0
+FIXED_T1_OFFSET_X = 24.0
 FIXED_T1_OFFSET_Y = 0.0
 FIXED_T1_OFFSET_Z = 0.0
 FIXED_BASE_Z = 6.0
