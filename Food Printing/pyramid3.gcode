@@ -45,9 +45,6 @@ G0 X70.81 Y51.08
 G1 X45.29 Y61.65 E28.95 F1100 ; Increment: 1.65
 G1 X48.90 Y34.26 E30.60 F1100
 G1 X70.81 Y51.08 E32.25 F1100
-; --- MATERIAL SWITCH ---
-G0 Z10 F600 ; Lift before switching
-M0 ; Change material / move to second injector
 ; --- LAYER 7: 27.2mm | 9.0° | Z11.0 ---
 G0 Z11.0 F600
 G0 X70.50 Y51.45
